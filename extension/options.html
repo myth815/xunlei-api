@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>远程迅雷下载设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <img src="icons/icon128.png" width="64" height="64" alt="" />
+        <div>
+          <p class="eyebrow">XUNLEI API</p>
+          <h1>远程迅雷下载</h1>
+          <p>配置一次，之后在网页、链接、图片、音视频或磁力地址上右键即可发送到迅雷。</p>
+        </div>
+      </header>
+
+      <section class="card" aria-labelledby="connection-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="connection-title">远程连接</h2>
+            <p>认证信息仅保存在当前浏览器的插件本地存储中。</p>
+          </div>
+          <span class="extension-id">扩展 ID：<code id="extension-id"></code></span>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>远程地址</span>
+            <input id="base-url" type="url" inputmode="url" placeholder="https://xunlei-api.example.com" autocomplete="url" />
+          </label>
+          <label>
+            <span>API Key</span>
+            <input id="api-key" type="password" placeholder="至少 32 个字符" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="save" class="button primary" type="button">保存配置</button>
+          <button id="test-connection" class="button secondary" type="button">测试连接</button>
+        </div>
+        <div id="connection-result" class="result" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="card" aria-labelledby="categories-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="categories-title">下载类目</h2>
+            <p>右键菜单按这里的顺序显示。路径填写迅雷界面中的目录，例如 <code>/downloads/电影</code>。</p>
+          </div>
+          <button id="add-category" class="button quiet" type="button">＋ 新增类目</button>
+        </div>
+        <div class="category-labels" aria-hidden="true">
+          <span>类目名称</span><span>迅雷下载路径</span><span></span>
+        </div>
+        <div id="categories" class="categories"></div>
+        <div class="actions">
+          <button id="verify-paths" class="button secondary" type="button">验证所有路径</button>
+        </div>
+        <div id="path-result" class="result" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="tip">
+        <strong>使用方法</strong>
+        <span>在网页空白处、下载链接或选中的磁力地址上右键，选择“添加到远程迅雷下载”，再选择下载类目。</span>
+      </section>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

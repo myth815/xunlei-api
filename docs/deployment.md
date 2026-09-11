@@ -47,15 +47,15 @@ volumes:
 
 ## Chrome 插件
 
-将扩展 ID 对应的完整来源加入配置，例如：
+仓库内扩展使用固定 ID `pjfbokcciledhphokcaookifodbgdmbb`。将其完整来源加入配置：
 
 ```text
-CORS_ALLOWED_ORIGINS=chrome-extension://abcdefghijklmnopabcdefghijklmnop
+CORS_ALLOWED_ORIGINS=chrome-extension://pjfbokcciledhphokcaookifodbgdmbb
 ```
 
 也可以逗号分隔多个准确来源。不要加尾部 `/`，不接受通配符。默认不允许浏览器跨域访问；不带 `Origin` 的服务端客户端可以正常通过 Bearer Key 认证调用。浏览器预检允许 `Authorization`、`Content-Type`、`Idempotency-Key`；不使用 Cookie。
 
-插件应让用户配置 API HTTPS 地址和密钥，使用浏览器存储保存个人设置，并按浏览器规则申请对应目标地址的 `host_permissions`。请求示例：
+插件让用户配置 API HTTPS 地址和密钥，使用 `chrome.storage.local` 保存个人设置，并从可选主机权限中只申请当前远程地址。请求示例：
 
 ```js
 const response = await fetch(`${apiBase}/v1/tasks`, {

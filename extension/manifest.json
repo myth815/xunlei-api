@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "远程迅雷下载",
+  "description": "通过右键菜单把网页、链接和磁力地址添加到远程迅雷。",
+  "version": "0.3.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2CZqnJqyxC48siORFg2u8/w0aN1h0VAalD/Agt1MoUXgjrKF+ltPC3vLHa6jRN2q0/maoq4Kj5Vvo7FreUqiPLaLkSDPOaLeRRsxBFUbRZIBYkDpFyjm9jmZQhNN/+Tv+DJvOjTlgZpU107Orl/QDPiUtJJp8av3FiRcMLJ9BAQ1J/7nl02SaDJNB2MM/wP6jz+f2j8G1gG8SuJStlDULpzcvqH3iNNB9gyKx8gjmL9VqyEc00C0PX1Fp/GlmaZ7Kc8BsNNQbiqe3lBeExfbiU46GONURIUTRMx3CsEdDAKwmjjbUIidAHitysSAAs+GE3idGtdtkiltYbjoV2PRTQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "notifications",
+    "scripting",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "远程迅雷下载设置",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -67,6 +67,12 @@ curl -fsS -X POST "$XUNLEI_API_URL/v1/tasks" \
 
 更多示例：[API 使用说明](docs/api.md)；机器可读文档：[OpenAPI](docs/openapi.yaml)，服务内的 `/openapi.yaml` 同样需要 API Key。
 
+## Chrome 扩展
+
+仓库内提供 Manifest V3 扩展，可以在网页、链接、图片、音视频或选中的磁力地址上右键，选择“添加到远程迅雷下载”，再选择默认、电影、音乐、电子书或自定义类目。设置页支持配置远程地址、API Key、类目路径，并分别测试连接与验证路径；提交时在页面右上角显示进行中和最终结果。
+
+从 [GitHub Release](https://github.com/myth815/xunlei-api/releases) 下载 `xunlei-api-chrome-extension_<版本>.zip`，解压后通过 `chrome://extensions` 的开发者模式加载。无需发布到 Chrome 应用商店。安装和权限说明见 [Chrome 扩展文档](extension/README.md)。
+
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |
@@ -106,7 +112,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o ./dist/xunlei-api ./cmd/xun
 docker build -t xunlei-api:dev .
 ```
 
-向仓库推送 `v0.1.0` 一类版本标签后，[发布流程](.github/workflows/release.yml) 先通过完整 CI，再使用 `GITHUB_TOKEN` 发布 `ghcr.io/myth815/xunlei-api:0.1.0`、`:0.1`、`:latest`。预发布标签不会覆盖稳定版的 `latest`。普通分支和外部 PR 只验证，不发布镜像。详细流程见 [发布说明](docs/releasing.md)。
+向仓库推送 `v0.1.0` 一类版本标签后，[发布流程](.github/workflows/release.yml) 先通过完整 CI，再使用 `GITHUB_TOKEN` 发布 `ghcr.io/myth815/xunlei-api:0.1.0`、`:0.1`、`:latest`，并将 Chrome 扩展 ZIP 与 Linux 二进制一同放入 GitHub Release。预发布标签不会覆盖稳定版的 `latest`。普通分支和外部 PR 只验证，不发布镜像。详细流程见 [发布说明](docs/releasing.md)。
 
 ## 致谢与许可证
 

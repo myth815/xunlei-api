@@ -7,7 +7,8 @@
 1. 格式、静态检查、带 race detector 的测试、工作流校验、Linux amd64 / arm64 交叉编译。
 2. 构建单架构测试镜像，以非 root、只读根文件系统和持久卷启动，验证健康检查。
 3. 构建并推送 GHCR 多架构镜像，附带 SBOM 和构建来源证明。
-4. 创建 GitHub Release，上传两个架构的 Linux 二进制压缩包和 `checksums.txt`。
+4. 构建无需商店签名的 Chrome Manifest V3 扩展 ZIP。
+5. 创建 GitHub Release，上传两个架构的 Linux 二进制压缩包、Chrome 扩展和 `checksums.txt`；标签本身同时提供源码 ZIP/TAR。
 
 普通 `main` 提交和 PR 执行 CI；不会获得镜像发布权限。Action 引用固定到完整提交 SHA，Go 构建镜像固定到版本及 manifest digest。
 

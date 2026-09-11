@@ -33,6 +33,14 @@ jobs:
         run: go vet ./...
       - name: Test with race detector
         run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - name: Test and package Chrome extension
+        run: |
+          node --check extension/background.js
+          node --check extension/options.js
+          node --check extension/shared.mjs
+          node --test extension/tests/*.test.mjs
+          python3 scripts/build_extension.py --output /tmp/xunlei-api-chrome-extension.zip
+          python3 -m zipfile --test /tmp/xunlei-api-chrome-extension.zip
       - name: Validate workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Cross-compile Linux binaries
