@@ -21,7 +21,7 @@ Chrome 插件 / OpenClaw / 其他服务
 - 持久化幂等记录和操作状态；区分请求已接受、状态已确认以及结果未知。
 - GitHub Actions 测试后发布 GHCR 多架构镜像，并生成 Linux 二进制、校验和、镜像 SBOM 与构建来源证明。
 
-支持范围和实测情况见 [兼容性与验证](docs/compatibility.md)。
+已在迅雷引擎 3.21.0 验证 HTTP / HTTPS 下载完成、暂停恢复、幂等投递、两种删除及 BT 选文件投递；BT 完整下载和真实失败重试尚未完成实测。详细记录见 [兼容性与验证](docs/compatibility.md)。
 
 ## 快速开始
 
