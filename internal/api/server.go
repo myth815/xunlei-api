@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,12 +38,13 @@ type Backend interface {
 }
 
 type Config struct {
-	APIKey           string
-	AllowedOrigins   []string
-	RequestTimeout   time.Duration
-	OperationTimeout time.Duration
-	PollInterval     time.Duration
-	OpenAPI          []byte
+	APIKey                 string
+	AllowedOrigins         []string
+	RequestTimeout         time.Duration
+	OperationTimeout       time.Duration
+	PollInterval           time.Duration
+	OpenAPI                []byte
+	DefaultDestinationPath string
 }
 
 type Server struct {
@@ -73,6 +75,11 @@ func New(cfg Config, b Backend, st *store.Store) (*Server, error) {
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 3 * time.Second
+	}
+	if cfg.DefaultDestinationPath != "" {
+		if _, err := canonicalDirectoryPath(cfg.DefaultDestinationPath, false); err != nil {
+			return nil, errors.New("DEFAULT_DESTINATION_PATH must be an absolute Xunlei display path")
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{cfg: cfg, backend: b, store: st, key: sha256.Sum256([]byte(cfg.APIKey)), origins: map[string]bool{}, ctx: ctx, cancel: cancel}
@@ -258,6 +265,96 @@ func (s *Server) device(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, v)
 }
+
+func canonicalDirectoryPath(value string, allowRoot bool) (string, error) {
+	if len(value) == 0 || len(value) > 4096 || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\\x00\r\n") {
+		return "", errors.New("directory path must be an absolute Xunlei display path")
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "." || segment == ".." {
+			return "", errors.New("directory path cannot contain dot segments")
+		}
+	}
+	clean := path.Clean(value)
+	if clean == "/" && !allowRoot {
+		return "", errors.New("the Xunlei root cannot be used as a download directory")
+	}
+	return clean, nil
+}
+
+func (s *Server) allDirectories(ctx context.Context, parentID string) ([]xunlei.Directory, error) {
+	var result []xunlei.Directory
+	cursor := ""
+	seen := map[string]bool{}
+	for pageNumber := 0; pageNumber < 100; pageNumber++ {
+		page, err := s.backend.Directories(ctx, parentID, cursor, 200)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page.Directories...)
+		if page.NextPageToken == "" {
+			return result, nil
+		}
+		if page.NextPageToken == cursor || seen[page.NextPageToken] {
+			return nil, &xunlei.Error{Kind: "upstream", Message: "upstream directory pagination did not advance", Status: 502}
+		}
+		seen[page.NextPageToken] = true
+		cursor = page.NextPageToken
+	}
+	return nil, &xunlei.Error{Kind: "upstream", Message: "upstream returned too many directory pages", Status: 502}
+}
+
+func (s *Server) resolveDirectoryPath(ctx context.Context, value string) (xunlei.Directory, string, error) {
+	clean, err := canonicalDirectoryPath(value, false)
+	if err != nil {
+		return xunlei.Directory{}, "", &xunlei.Error{Kind: "invalid", Message: err.Error(), Status: 400}
+	}
+	parentID := ""
+	currentPath := ""
+	var current xunlei.Directory
+	for _, segment := range strings.Split(strings.TrimPrefix(clean, "/"), "/") {
+		directories, err := s.allDirectories(ctx, parentID)
+		if err != nil {
+			return xunlei.Directory{}, "", err
+		}
+		matches := make([]xunlei.Directory, 0, 1)
+		for _, directory := range directories {
+			if directory.Name == segment {
+				matches = append(matches, directory)
+			}
+		}
+		if len(matches) == 0 {
+			return xunlei.Directory{}, "", &xunlei.Error{Kind: "not_found", Message: "Xunlei directory path was not found", Status: 404}
+		}
+		if len(matches) > 1 {
+			return xunlei.Directory{}, "", &xunlei.Error{Kind: "invalid", Message: "Xunlei directory path is ambiguous because sibling names are duplicated", Status: 400}
+		}
+		current = matches[0]
+		currentPath = path.Join(currentPath, "/", segment)
+		current.DisplayPath = currentPath
+		parentID = current.ID
+	}
+	if current.ID == "" || !current.Writable {
+		return xunlei.Directory{}, "", &xunlei.Error{Kind: "invalid", Message: "Xunlei directory path is not writable", Status: 400}
+	}
+	return current, currentPath, nil
+}
+
+func annotateDirectoryPage(page xunlei.DirectoryPage, parentPath string) xunlei.DirectoryPage {
+	page.ParentPath = parentPath
+	for i := range page.Directories {
+		name := page.Directories[i].Name
+		if name == "" || strings.ContainsAny(name, "/\\\x00\r\n") || name == "." || name == ".." {
+			continue
+		}
+		page.Directories[i].DisplayPath = path.Join(parentPath, name)
+		if !strings.HasPrefix(page.Directories[i].DisplayPath, "/") {
+			page.Directories[i].DisplayPath = "/" + page.Directories[i].DisplayPath
+		}
+	}
+	return page
+}
+
 func (s *Server) directories(w http.ResponseWriter, r *http.Request) {
 	n, e := limit(r)
 	if e != nil {
@@ -266,10 +363,38 @@ func (s *Server) directories(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, c := s.readContext(r)
 	defer c()
-	v, e := s.backend.Directories(ctx, r.URL.Query().Get("parent_id"), r.URL.Query().Get("cursor"), n)
+	parentID := r.URL.Query().Get("parent_id")
+	displayPath := r.URL.Query().Get("path")
+	if parentID != "" && displayPath != "" {
+		fail(w, 400, "invalid_directory_selector", "Use either parent_id or path, not both")
+		return
+	}
+	parentPath := ""
+	if displayPath != "" {
+		clean, err := canonicalDirectoryPath(displayPath, true)
+		if err != nil {
+			fail(w, 400, "invalid_directory_path", err.Error())
+			return
+		}
+		parentPath = clean
+		if clean != "/" {
+			directory, resolved, err := s.resolveDirectoryPath(ctx, clean)
+			if err != nil {
+				backendError(w, err)
+				return
+			}
+			parentID, parentPath = directory.ID, resolved
+		}
+	} else if parentID == "" {
+		parentPath = "/"
+	}
+	v, e := s.backend.Directories(ctx, parentID, r.URL.Query().Get("cursor"), n)
 	if e != nil {
 		backendError(w, e)
 		return
+	}
+	if parentPath != "" {
+		v = annotateDirectoryPage(v, parentPath)
 	}
 	writeJSON(w, 200, v)
 }
@@ -431,11 +556,22 @@ func (s *Server) failure(w http.ResponseWriter, op store.Operation, err error) {
 }
 func (s *Server) createDirectory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ParentID string `json:"parent_id"`
-		Name     string `json:"name"`
+		ParentID   string `json:"parent_id,omitempty"`
+		ParentPath string `json:"parent_path,omitempty"`
+		Name       string `json:"name"`
 	}
 	if !decode(w, r, &body) {
 		return
+	}
+	if (body.ParentID == "") == (body.ParentPath == "") {
+		fail(w, 400, "invalid_directory_selector", "Use exactly one of parent_path or parent_id")
+		return
+	}
+	if body.ParentPath != "" {
+		if _, err := canonicalDirectoryPath(body.ParentPath, false); err != nil {
+			fail(w, 400, "invalid_directory_path", err.Error())
+			return
+		}
 	}
 	s.mutation.Lock()
 	defer s.mutation.Unlock()
@@ -445,10 +581,22 @@ func (s *Server) createDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, c := context.WithTimeout(s.ctx, s.cfg.RequestTimeout)
 	defer c()
-	v, e := s.backend.CreateDirectory(ctx, body.ParentID, body.Name)
+	parentID, parentPath := body.ParentID, ""
+	if body.ParentPath != "" {
+		parent, resolved, err := s.resolveDirectoryPath(ctx, body.ParentPath)
+		if err != nil {
+			s.failure(w, op, err)
+			return
+		}
+		parentID, parentPath = parent.ID, resolved
+	}
+	v, e := s.backend.CreateDirectory(ctx, parentID, body.Name)
 	if e != nil {
 		s.failure(w, op, e)
 		return
+	}
+	if parentPath != "" && v.Name != "" && !strings.ContainsAny(v.Name, "/\\\x00\r\n") {
+		v.DisplayPath = path.Join(parentPath, v.Name)
 	}
 	op.Status = "confirmed"
 	op.Result, _ = json.Marshal(v)
@@ -465,6 +613,24 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_file_indices", "file_indices cannot be an empty array; omit it to select all files")
 		return
 	}
+	if body.DestinationID != "" && body.DestinationPath != "" {
+		fail(w, 400, "invalid_directory_selector", "Use either destination_path or destination_id, not both")
+		return
+	}
+	destinationPath := body.DestinationPath
+	if body.DestinationID == "" && destinationPath == "" {
+		destinationPath = s.cfg.DefaultDestinationPath
+	}
+	if body.DestinationID == "" && destinationPath == "" {
+		fail(w, 400, "destination_required", "Supply destination_path or configure DEFAULT_DESTINATION_PATH")
+		return
+	}
+	if destinationPath != "" {
+		if _, err := canonicalDirectoryPath(destinationPath, false); err != nil {
+			fail(w, 400, "invalid_directory_path", err.Error())
+			return
+		}
+	}
 	s.mutation.Lock()
 	defer s.mutation.Unlock()
 	op, ok := s.begin(w, r, "create_task", body)
@@ -473,6 +639,15 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, c := context.WithTimeout(s.ctx, s.cfg.RequestTimeout)
 	defer c()
+	if destinationPath != "" {
+		destination, _, err := s.resolveDirectoryPath(ctx, destinationPath)
+		if err != nil {
+			s.failure(w, op, err)
+			return
+		}
+		body.DestinationID = destination.ID
+		body.DestinationPath = ""
+	}
 	v, e := s.backend.CreateTask(ctx, body)
 	if e != nil {
 		s.failure(w, op, e)

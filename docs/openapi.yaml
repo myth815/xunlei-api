@@ -58,7 +58,11 @@ paths:
         - name: parent_id
           in: query
           schema: {type: string}
-          description: Omit to list available roots.
+          description: Internal compatibility selector. Do not combine with path; omit both to list roots.
+        - name: path
+          in: query
+          schema: {type: string, example: /迅雷下载/电影}
+          description: Xunlei display path whose children should be listed. Use / for roots.
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -74,6 +78,9 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/Directory'}
                   next_page_token: {type: string}
+                  parent_path:
+                    type: string
+                    description: Canonical Xunlei display path when path-based navigation is used.
         default: {$ref: '#/components/responses/Error'}
     post:
       operationId: createDirectory
@@ -87,9 +94,11 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [parent_id, name]
+              required: [name]
+              description: Supply exactly one of parent_path or parent_id.
               properties:
                 parent_id: {type: string, minLength: 1}
+                parent_path: {type: string, minLength: 1, example: /迅雷下载}
                 name: {type: string, minLength: 1}
       responses:
         '201': {$ref: '#/components/responses/Operation'}
@@ -362,7 +371,12 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        path: {type: string}
+        path:
+          type: string
+          description: Upstream engine path retained for diagnostics; clients should use display_path.
+        display_path:
+          type: string
+          description: User-facing path made from directory names shown by Xunlei.
         writable: {type: boolean}
     Resource:
       type: object
@@ -390,10 +404,19 @@ components:
     CreateTask:
       type: object
       additionalProperties: false
-      required: [url, destination_id]
+      required: [url]
+      description: Supply at most one destination selector. If neither is supplied, DEFAULT_DESTINATION_PATH must be configured on the service.
       properties:
         url: {type: string, minLength: 1}
-        destination_id: {type: string, minLength: 1}
+        destination_path:
+          type: string
+          minLength: 1
+          example: /迅雷下载/电影
+          description: Preferred user-facing Xunlei display path.
+        destination_id:
+          type: string
+          minLength: 1
+          description: Internal compatibility selector; do not combine with destination_path.
         name: {type: string}
         file_indices:
           type: array

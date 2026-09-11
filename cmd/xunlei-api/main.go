@@ -136,7 +136,14 @@ func run() error {
 			origins = append(origins, o)
 		}
 	}
-	app, err := api.New(api.Config{APIKey: key, AllowedOrigins: origins, RequestTimeout: timeout + 15*time.Second, OperationTimeout: operationTimeout, OpenAPI: docs.OpenAPI}, backend, st)
+	app, err := api.New(api.Config{
+		APIKey:                 key,
+		AllowedOrigins:         origins,
+		RequestTimeout:         timeout + 15*time.Second,
+		OperationTimeout:       operationTimeout,
+		OpenAPI:                docs.OpenAPI,
+		DefaultDestinationPath: os.Getenv("DEFAULT_DESTINATION_PATH"),
+	}, backend, st)
 	if err != nil {
 		return err
 	}

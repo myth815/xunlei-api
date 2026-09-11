@@ -65,7 +65,7 @@ const response = await fetch(`${apiBase}/v1/tasks`, {
     "Content-Type": "application/json",
     "Idempotency-Key": crypto.randomUUID(),
   },
-  body: JSON.stringify({ url, destination_id: destinationID }),
+  body: JSON.stringify({ url, destination_path: destinationPath }),
 });
 const result = await response.json();
 ```

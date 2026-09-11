@@ -68,14 +68,16 @@ type ListOptions struct {
 }
 
 type Directory struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Writable bool   `json:"writable"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	DisplayPath string `json:"display_path,omitempty"`
+	Writable    bool   `json:"writable"`
 }
 type DirectoryPage struct {
 	Directories   []Directory `json:"directories"`
 	NextPageToken string      `json:"next_page_token"`
+	ParentPath    string      `json:"parent_path,omitempty"`
 }
 
 type Resource struct {
@@ -97,8 +99,11 @@ type Resolution struct {
 }
 type CreateRequest struct {
 	URL           string `json:"url"`
-	DestinationID string `json:"destination_id"`
-	Name          string `json:"name,omitempty"`
+	DestinationID string `json:"destination_id,omitempty"`
+	// DestinationPath is resolved by the public API before the Xunlei client is
+	// called. It is a path made from names shown in Xunlei, not a host path.
+	DestinationPath string `json:"destination_path,omitempty"`
+	Name            string `json:"name,omitempty"`
 	// A nil slice selects all files. An explicit empty slice is invalid.
 	FileIndices []int `json:"file_indices,omitempty"`
 }

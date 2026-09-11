@@ -31,7 +31,7 @@ Chrome 插件 / OpenClaw / 其他服务
 openssl rand -hex 32
 ```
 
-配置 `API_KEY` 和 `XUNLEI_BASE_URL`。后者是**API 容器可以访问到的迅雷地址**，例如 `http://xunlei:2345`，不需要拼接 `index.cgi`。`xunlei` 这个名称只有在两个容器处于同一 Docker 网络时才能解析；如果迅雷已在其他网络运行，应接入该网络，或填写容器可访问的主机地址。
+配置 `API_KEY` 和 `XUNLEI_BASE_URL`。后者是**API 容器可以访问到的迅雷地址**，例如 `http://xunlei:2345`，不需要拼接 `index.cgi`。`xunlei` 这个名称只有在两个容器处于同一 Docker 网络时才能解析；如果迅雷已在其他网络运行，应接入该网络，或填写容器可访问的主机地址。可以把 `DEFAULT_DESTINATION_PATH` 设置为迅雷界面中的常用目录，例如 `/迅雷下载`。
 
 ```sh
 docker compose up -d
@@ -51,15 +51,17 @@ curl -fsS -H "Authorization: Bearer $XUNLEI_API_KEY" \
   "$XUNLEI_API_URL/v1/directories"
 ```
 
-从目录响应选择真实目录 ID，再创建任务。任务目录参数是迅雷返回的 ID，而不是宿主机路径。
+目录响应包含可直接使用的 `display_path`。它由迅雷界面中的目录名称组成，例如 `/迅雷下载/电影`，不是 NAS 宿主机路径。创建任务时直接传这个路径，API 会自动转换成迅雷内部 ID：
 
 ```sh
 curl -fsS -X POST "$XUNLEI_API_URL/v1/tasks" \
   -H "Authorization: Bearer $XUNLEI_API_KEY" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: download-example-001' \
-  -d '{"url":"https://example.org/example.zip","destination_id":"DIRECTORY_ID"}'
+  -d '{"url":"https://example.org/example.zip","destination_path":"/迅雷下载/电影"}'
 ```
+
+配置了 `DEFAULT_DESTINATION_PATH` 后还可以省略 `destination_path`。原有 `destination_id` 仅为兼容旧调用方保留。
 
 创建响应的 `operation.result` 包含任务结果。随后按任务 ID 查询；暂停、恢复、删除返回操作 ID，通过 `/v1/operations/{id}` 确认结果。每次新的操作使用新的 `Idempotency-Key`；同一操作因网络问题重发时复用原键和原始请求。
 
@@ -71,6 +73,7 @@ curl -fsS -X POST "$XUNLEI_API_URL/v1/tasks" \
 | --- | --- | --- |
 | `XUNLEI_BASE_URL` | `http://xunlei:2345` | 现有迅雷服务的 HTTP / HTTPS 地址 |
 | `API_KEY` / `API_KEY_FILE` | — | 必填且二选一，32–512 字符；文件方式适合 Docker secret |
+| `DEFAULT_DESTINATION_PATH` | 空 | 默认迅雷界面目录，例如 `/迅雷下载`；配置后投递时可省略目录 |
 | `LISTEN_ADDR` | `:8080` | API 监听地址 |
 | `DATA_DIR` | `/data` | 持久化操作和幂等记录目录；运行用户必须可写 |
 | `XUNLEI_USERNAME` | 空 | 迅雷包装器的 HTTP Basic 用户名，可选 |

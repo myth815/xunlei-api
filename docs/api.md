@@ -9,8 +9,8 @@
 | `GET /healthz` | 无需认证的存活检查 | — |
 | `GET /openapi.yaml` | OpenAPI 文档 | — |
 | `GET /v1/device` | 设备版本、在线、登录和磁盘信息 | — |
-| `GET /v1/directories` | 目录分页，`parent_id`、`cursor`、`limit` | — |
-| `POST /v1/directories` | `{ "parent_id": "…", "name": "…" }` | 必填 |
+| `GET /v1/directories` | 目录分页，优先使用 `path`，也兼容 `parent_id` | — |
+| `POST /v1/directories` | `{ "parent_path": "…", "name": "…" }` | 必填 |
 | `POST /v1/resources/resolve` | `{ "url": "…" }`，解析链接和文件树 | — |
 | `POST /v1/resources/torrent` | multipart，字段名 `file`，上传原始种子并解析 | — |
 | `GET /v1/tasks` | `status`、`cursor`、`limit` 分页 | — |
@@ -26,6 +26,18 @@
 
 返回列表的 `next_page_token` 非空时，将该值作为下一次请求的 `cursor`。不要把游标当成偏移量；查询任务时保持其他筛选参数一致。
 
+## 目录路径
+
+不传查询参数时，`GET /v1/directories` 返回迅雷的根目录，并为每项添加 `display_path`。使用 `path` 可继续浏览某个目录：
+
+```text
+GET /v1/directories?path=/迅雷下载
+```
+
+`display_path` 由迅雷界面中看到的目录名称组成，不是 NAS 的 `/volume1/...` 路径，也不是迅雷引擎返回的内部 `path`。同级目录名称重复会使路径产生歧义，此时 API 会拒绝转换，调用方可回退到内部 `parent_id` / `destination_id`。
+
+创建子目录时传 `parent_path`；`parent_id` 只为旧调用方保留。两者不能同时出现。
+
 ## 投递与种子选择
 
 创建普通链接或磁力任务：
@@ -33,17 +45,17 @@
 ```json
 {
   "url": "https://example.org/example.zip",
-  "destination_id": "DIRECTORY_ID",
+  "destination_path": "/迅雷下载/电影",
   "name": "example.zip"
 }
 ```
 
-`name` 可省略，使用资源解析得到的名称。`destination_id` 必填，从目录接口取得。先解析资源，再用响应里的真实文件索引选择文件；索引 `0` 是有效值，不能用数组位置替代迅雷文件索引：
+`name` 可省略，使用资源解析得到的名称。服务配置了 `DEFAULT_DESTINATION_PATH` 后，也可以省略 `destination_path`。原有 `destination_id` 继续兼容，但不能与 `destination_path` 同时使用。先解析资源，再用响应里的真实文件索引选择文件；索引 `0` 是有效值，不能用数组位置替代迅雷文件索引：
 
 ```json
 {
   "url": "magnet:?xt=urn:btih:EXAMPLE_INFO_HASH",
-  "destination_id": "DIRECTORY_ID",
+  "destination_path": "/迅雷下载/电影",
   "file_indices": [0, 3, 7]
 }
 ```
@@ -60,7 +72,7 @@ curl -fsS "$XUNLEI_API_URL/v1/resources/torrent" \
   -F 'file=@example.torrent'
 ```
 
-上传要求单个 `.torrent` 文件，大小为 1 字节至 16 MiB。上传与解析本身不创建下载任务。使用返回的 `url`，结合 `destination_id` 和需要的 `file_indices` 调用创建接口。原始种子会交给迅雷解析，不在 API 内改写为丢失 tracker 元数据的磁力链接。
+上传要求单个 `.torrent` 文件，大小为 1 字节至 16 MiB。上传与解析本身不创建下载任务。使用返回的 `url`，结合 `destination_path` 和需要的 `file_indices` 调用创建接口。原始种子会交给迅雷解析，不在 API 内改写为丢失 tracker 元数据的磁力链接。
 
 ## 状态和操作
 

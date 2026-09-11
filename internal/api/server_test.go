@@ -21,20 +21,30 @@ const testAPIKey = "0123456789abcdef0123456789abcdef"
 type backendCall struct{ method, id, action string }
 
 type mockBackend struct {
-	mu            sync.Mutex
-	tasks         map[string]xunlei.Task
-	calls         []backendCall
-	device        xunlei.Device
-	createError   error
-	controlError  error
-	deleteError   error
-	prepareError  error
-	recreateError error
-	afterCreate   func()
+	mu             sync.Mutex
+	tasks          map[string]xunlei.Task
+	calls          []backendCall
+	device         xunlei.Device
+	createError    error
+	controlError   error
+	deleteError    error
+	prepareError   error
+	recreateError  error
+	afterCreate    func()
+	directories    map[string][]xunlei.Directory
+	directoryPages map[string]map[string]xunlei.DirectoryPage
 }
 
 func newMockBackend() *mockBackend {
-	return &mockBackend{tasks: map[string]xunlei.Task{}, device: xunlei.Device{ID: "local-device", Online: true, LoggedIn: true}}
+	return &mockBackend{
+		tasks:  map[string]xunlei.Task{},
+		device: xunlei.Device{ID: "local-device", Online: true, LoggedIn: true},
+		directories: map[string][]xunlei.Directory{
+			"":     {{ID: "root", Name: "迅雷下载", Path: "/downloads", Writable: true}},
+			"root": {{ID: "movies", Name: "电影", Writable: true}, {ID: "shows", Name: "剧集", Writable: true}},
+		},
+		directoryPages: map[string]map[string]xunlei.DirectoryPage{},
+	}
 }
 
 func (m *mockBackend) count(method string) int {
@@ -89,11 +99,16 @@ func (m *mockBackend) Task(_ context.Context, id string) (xunlei.Task, error) {
 	return xunlei.Task{}, &xunlei.Error{Kind: "not_found", Message: "task not found"}
 }
 
-func (m *mockBackend) Directories(context.Context, string, string, int) (xunlei.DirectoryPage, error) {
+func (m *mockBackend) Directories(_ context.Context, parent, cursor string, _ int) (xunlei.DirectoryPage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, backendCall{method: "directories"})
-	return xunlei.DirectoryPage{Directories: []xunlei.Directory{}}, nil
+	m.calls = append(m.calls, backendCall{method: "directories", id: parent, action: cursor})
+	if pages := m.directoryPages[parent]; pages != nil {
+		if page, ok := pages[cursor]; ok {
+			return page, nil
+		}
+	}
+	return xunlei.DirectoryPage{Directories: append([]xunlei.Directory(nil), m.directories[parent]...)}, nil
 }
 
 func (m *mockBackend) CreateDirectory(_ context.Context, parent, name string) (xunlei.Directory, error) {
@@ -120,7 +135,7 @@ func (m *mockBackend) UploadTorrent(context.Context, string, io.Reader) (xunlei.
 func (m *mockBackend) CreateTask(_ context.Context, request xunlei.CreateRequest) (xunlei.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = append(m.calls, backendCall{method: "create"})
+	m.calls = append(m.calls, backendCall{method: "create", id: request.DestinationID})
 	if m.createError != nil {
 		return xunlei.Task{}, m.createError
 	}
@@ -275,6 +290,99 @@ func TestAPIKeyAndOriginConfiguration(t *testing.T) {
 			s.Close()
 			t.Fatalf("accepted invalid origin %q", origin)
 		}
+	}
+	for _, destination := range []string{"relative/path", "/", "/迅雷下载/../其他", "/bad\\name"} {
+		if s, err := New(Config{APIKey: testAPIKey, DefaultDestinationPath: destination}, newMockBackend(), st); err == nil {
+			s.Close()
+			t.Fatalf("accepted invalid default destination %q", destination)
+		}
+	}
+}
+
+func TestFriendlyDirectoryPathsAndDefaultDestination(t *testing.T) {
+	b := newMockBackend()
+	s, _ := testServer(t, b, Config{})
+
+	response := request(s, "GET", "/v1/directories", "", nil)
+	var root xunlei.DirectoryPage
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &root) != nil || root.ParentPath != "/" || len(root.Directories) != 1 || root.Directories[0].DisplayPath != "/迅雷下载" {
+		t.Fatalf("root display paths: %d %s", response.Code, response.Body)
+	}
+	response = request(s, "GET", "/v1/directories?path=%2F%E8%BF%85%E9%9B%B7%E4%B8%8B%E8%BD%BD", "", nil)
+	var children xunlei.DirectoryPage
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &children) != nil || children.ParentPath != "/迅雷下载" || len(children.Directories) != 2 || children.Directories[0].DisplayPath != "/迅雷下载/电影" {
+		t.Fatalf("child display paths: %d %s", response.Code, response.Body)
+	}
+
+	response = request(s, "POST", "/v1/tasks", `{"url":"https://example.org/file","destination_path":"/迅雷下载/电影"}`, map[string]string{"Idempotency-Key": "path-task"})
+	op := responseOperation(t, response)
+	var task xunlei.Task
+	if response.Code != 201 || json.Unmarshal(op.Result, &task) != nil || task.DestinationID != "movies" {
+		t.Fatalf("path task: %d %+v %s", response.Code, task, response.Body)
+	}
+
+	defaultServer, _ := testServer(t, newMockBackend(), Config{DefaultDestinationPath: "/迅雷下载/剧集"})
+	response = request(defaultServer, "POST", "/v1/tasks", `{"url":"https://example.org/default"}`, map[string]string{"Idempotency-Key": "default-task"})
+	op = responseOperation(t, response)
+	if response.Code != 201 || json.Unmarshal(op.Result, &task) != nil || task.DestinationID != "shows" {
+		t.Fatalf("default path task: %d %+v %s", response.Code, task, response.Body)
+	}
+}
+
+func TestDirectoryPathCreationPaginationAndValidation(t *testing.T) {
+	b := newMockBackend()
+	b.directoryPages[""] = map[string]xunlei.DirectoryPage{
+		"":       {Directories: []xunlei.Directory{{ID: "other", Name: "其他", Writable: true}}, NextPageToken: "second"},
+		"second": {Directories: []xunlei.Directory{{ID: "root", Name: "迅雷下载", Writable: true}}},
+	}
+	s, _ := testServer(t, b, Config{})
+	response := request(s, "POST", "/v1/directories", `{"parent_path":"/迅雷下载","name":"新目录"}`, map[string]string{"Idempotency-Key": "path-directory"})
+	op := responseOperation(t, response)
+	var directory xunlei.Directory
+	if response.Code != 201 || json.Unmarshal(op.Result, &directory) != nil || directory.DisplayPath != "/迅雷下载/新目录" {
+		t.Fatalf("path directory: %d %+v %s", response.Code, directory, response.Body)
+	}
+	b.mu.Lock()
+	lastParent := ""
+	for _, call := range b.calls {
+		if call.method == "create_directory" {
+			lastParent = call.id
+		}
+	}
+	b.mu.Unlock()
+	if lastParent != "root" {
+		t.Fatalf("friendly parent resolved to %q", lastParent)
+	}
+
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{"missing", `{"url":"https://example.org/file"}`},
+		{"both", `{"url":"https://example.org/file","destination_id":"root","destination_path":"/迅雷下载"}`},
+		{"relative", `{"url":"https://example.org/file","destination_path":"迅雷下载"}`},
+		{"root", `{"url":"https://example.org/file","destination_path":"/"}`},
+		{"dot", `{"url":"https://example.org/file","destination_path":"/迅雷下载/../其他"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := b.count("create")
+			got := request(s, "POST", "/v1/tasks", tc.body, map[string]string{"Idempotency-Key": "invalid-" + tc.name})
+			if got.Code != 400 || b.count("create") != before {
+				t.Fatalf("invalid selector reached task creation: %d %s", got.Code, got.Body)
+			}
+		})
+	}
+	if got := request(s, "GET", "/v1/directories?parent_id=root&path=%2F%E8%BF%85%E9%9B%B7%E4%B8%8B%E8%BD%BD", "", nil); got.Code != 400 {
+		t.Fatalf("two directory selectors accepted: %d %s", got.Code, got.Body)
+	}
+
+	b.directories["root"] = append(b.directories["root"], xunlei.Directory{ID: "movies-duplicate", Name: "电影", Writable: true})
+	response = request(s, "POST", "/v1/tasks", `{"url":"https://example.org/file","destination_path":"/迅雷下载/电影"}`, map[string]string{"Idempotency-Key": "ambiguous"})
+	if response.Code != 400 || responseOperation(t, response).Status != "failed" {
+		t.Fatalf("ambiguous path accepted: %d %s", response.Code, response.Body)
+	}
+	response = request(s, "POST", "/v1/tasks", `{"url":"https://example.org/file","destination_path":"/迅雷下载/不存在"}`, map[string]string{"Idempotency-Key": "not-found"})
+	if response.Code != 404 || responseOperation(t, response).Status != "failed" {
+		t.Fatalf("missing path accepted: %d %s", response.Code, response.Body)
 	}
 }
 
