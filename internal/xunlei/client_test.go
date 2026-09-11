@@ -814,3 +814,40 @@ func TestSavedSelectionValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestBTResourceOmittedZeroIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      bool
+	}{
+		{"engine321", `{"name":"fixture","file_count":2,"meta":{"bt_infohash":"abc"},"dir":{"resources":[{"name":"one","file_count":1},{"name":"two","file_count":1,"file_index":1}]}}`, true},
+		{"missing_metadata", `{"file_count":2,"dir":{"resources":[{"file_count":1},{"file_count":1,"file_index":1}]}}`, false},
+		{"two_missing", `{"file_count":2,"meta":{"bt_infohash":"abc"},"dir":{"resources":[{"file_count":1},{"file_count":1}]}}`, false},
+		{"wrong_range", `{"file_count":2,"meta":{"bt_infohash":"abc"},"dir":{"resources":[{"file_count":1},{"file_count":1,"file_index":3}]}}`, false},
+		{"explicit_null", `{"file_count":2,"meta":{"bt_infohash":"abc"},"dir":{"resources":[{"file_count":1,"file_index":null},{"file_count":1,"file_index":1}]}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.raw), &raw); err != nil {
+				t.Fatal(err)
+			}
+			r, _, complete, err := parseResource(raw)
+			if err != nil || !complete {
+				t.Fatalf("parse: %v, %v", complete, err)
+			}
+			normalizeBTIndices(&r)
+			index := r.Resources[0].FileIndex
+			if tc.want {
+				if index == nil || *index != 0 {
+					t.Fatal("BT index zero was not normalized")
+				}
+				selected, err := selectedIndices(Resolution{Complete: true, Resources: []Resource{r}}, []int{0, 1})
+				if err != nil || selected != "0,1" {
+					t.Fatalf("selection: %s, %v", selected, err)
+				}
+			} else if index != nil {
+				t.Fatal("ambiguous index was inferred")
+			}
+		})
+	}
+}

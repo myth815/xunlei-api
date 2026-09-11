@@ -56,11 +56,6 @@ jobs:
         run: |
           name="xunlei-api-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           volume="$name-data"
-          cleanup() {
-            docker rm -f "$name" >/dev/null 2>&1 || true
-            docker volume rm "$volume" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
           test "$(docker image inspect xunlei-api:ci --format '{{.Config.User}}')" = '65532:65532'
           docker run -d --name "$name" --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m \
             --cap-drop ALL --security-opt no-new-privileges:true \
@@ -68,7 +63,7 @@ jobs:
             -e API_KEY=ci-only-key-00000000000000000000000000000000 \
             -e XUNLEI_BASE_URL=http://127.0.0.1:9 \
             --health-interval=2s --health-start-period=1s xunlei-api:ci
-          for attempt in $(seq 1 20); do
+          for ((attempt=1; attempt<=20; attempt++)); do
             if [ "$(docker inspect "$name" --format '{{.State.Health.Status}}')" = healthy ]; then
               docker image inspect xunlei-api:ci --format 'Image size: {{.Size}} bytes'
               exit 0
@@ -78,3 +73,9 @@ jobs:
           docker logs "$name"
           docker inspect "$name" --format '{{json .State.Health}}'
           exit 1
+      - name: Clean up smoke-test container
+        if: always()
+        run: |
+          name="xunlei-api-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          docker volume rm "$name-data" >/dev/null 2>&1 || true

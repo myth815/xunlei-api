@@ -185,6 +185,52 @@ func parseResource(raw map[string]json.RawMessage) (Resource, int, bool, error) 
 	return r, count, complete, nil
 }
 func mustJSON(v any) []byte { data, _ := json.Marshal(v); return data }
+
+// Engine 3.21.0 omits file_index for BT index zero. Its web UI explicitly
+// defaults that field to zero. Only restore this default for a complete BT
+// tree with exactly one omitted index and every other index accounted for.
+func normalizeBTIndices(r *Resource) {
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(r.Raw["meta"], &meta) != nil || scalar(meta["bt_infohash"]) == "" {
+		return
+	}
+	var leaves []*Resource
+	var walk func(*Resource)
+	walk = func(node *Resource) {
+		if len(node.Resources) == 0 {
+			leaves = append(leaves, node)
+			return
+		}
+		for i := range node.Resources {
+			walk(&node.Resources[i])
+		}
+	}
+	walk(r)
+	if len(leaves) != r.FileCount {
+		return
+	}
+	var missing *Resource
+	seen := map[int]bool{}
+	for _, leaf := range leaves {
+		if leaf.FileIndex == nil {
+			if _, present := leaf.Raw["file_index"]; present || missing != nil {
+				return
+			}
+			missing = leaf
+			continue
+		}
+		i := *leaf.FileIndex
+		if i <= 0 || i >= len(leaves) || seen[i] {
+			return
+		}
+		seen[i] = true
+	}
+	if missing != nil && len(seen) == len(leaves)-1 {
+		zero := 0
+		missing.FileIndex = &zero
+	}
+}
+
 func (c *Client) Resolve(ctx context.Context, source string) (Resolution, error) {
 	if err := validateURL(source); err != nil {
 		return Resolution{}, err
@@ -206,6 +252,9 @@ func (c *Client) Resolve(ctx context.Context, source string) (Resolution, error)
 		r, _, complete, err := parseResource(raw)
 		if err != nil {
 			return Resolution{}, err
+		}
+		if complete {
+			normalizeBTIndices(&r)
 		}
 		resolution.Resources = append(resolution.Resources, r)
 		resolution.Complete = resolution.Complete && complete
