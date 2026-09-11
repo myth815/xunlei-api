@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+data/
+dist/
+coverage*
+*.out
+*.test
+.DS_Store

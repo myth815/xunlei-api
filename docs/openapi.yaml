@@ -1,0 +1,421 @@
+openapi: 3.1.0
+info:
+  title: Xunlei Docker API
+  version: 0.1.0
+  description: >-
+    An authenticated adapter for an existing, logged-in Xunlei Docker instance.
+    Mutation acceptance and observed completion are represented separately.
+    This project is independent of Xunlei and does not include its engine.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: health
+      summary: Process liveness; does not contact Xunlei
+      security: []
+      responses:
+        '200':
+          description: Process is serving requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+  /openapi.yaml:
+    get:
+      operationId: openAPI
+      summary: Read this API specification
+      responses:
+        '200':
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema: {type: string}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/device:
+    get:
+      operationId: getDevice
+      summary: Read the configured Xunlei device
+      responses:
+        '200':
+          description: Device state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Device'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/directories:
+    get:
+      operationId: listDirectories
+      summary: List directories on the configured device
+      parameters:
+        - name: parent_id
+          in: query
+          schema: {type: string}
+          description: Omit to list available roots.
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Directory page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [directories, next_page_token]
+                properties:
+                  directories:
+                    type: array
+                    items: {$ref: '#/components/schemas/Directory'}
+                  next_page_token: {type: string}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createDirectory
+      summary: Create a child directory
+      parameters:
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [parent_id, name]
+              properties:
+                parent_id: {type: string, minLength: 1}
+                name: {type: string, minLength: 1}
+      responses:
+        '201': {$ref: '#/components/responses/Operation'}
+        '200': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/resources/resolve:
+    post:
+      operationId: resolveResource
+      summary: Resolve an HTTP, HTTPS or magnet URL without starting a download
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url]
+              properties:
+                url: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Resolved resource tree
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resolution'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/resources/torrent:
+    post:
+      operationId: uploadTorrent
+      summary: Upload a torrent to Xunlei and resolve it without creating a task
+      description: Supply exactly one .torrent file, between 1 byte and 16 MiB.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Resolved torrent; use its URL when creating a task
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resolution'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/tasks:
+    get:
+      operationId: listTasks
+      summary: List tasks belonging to the configured local device
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, active, pending, running, paused, complete, error]
+            default: all
+          description: active includes pending, running, paused and error tasks.
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Task page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tasks, next_page_token, expires_in]
+                properties:
+                  tasks:
+                    type: array
+                    items: {$ref: '#/components/schemas/Task'}
+                  next_page_token: {type: string}
+                  expires_in: {type: integer}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createTask
+      summary: Create a download in an explicit destination directory
+      parameters:
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateTask'}
+      responses:
+        '201': {$ref: '#/components/responses/Operation'}
+        '200': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/tasks/{id}:
+    parameters:
+      - {$ref: '#/components/parameters/TaskID'}
+    get:
+      operationId: getTask
+      summary: Read a task by ID
+      responses:
+        '200':
+          description: Current task observation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteTask
+      summary: Delete a task record, preserving files by default
+      description: >-
+        delete_files=true sends Xunlei's file-deletion command. The API has no
+        direct access to the download filesystem and cannot independently prove
+        removal of files solely from the disappearance of a task record.
+      parameters:
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+        - name: delete_files
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        '200': {$ref: '#/components/responses/Operation'}
+        '202': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/tasks/{id}/pause:
+    parameters:
+      - {$ref: '#/components/parameters/TaskID'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+    post:
+      operationId: pauseTask
+      summary: Pause a task and observe the resulting state
+      responses:
+        '200': {$ref: '#/components/responses/Operation'}
+        '202': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/tasks/{id}/resume:
+    parameters:
+      - {$ref: '#/components/parameters/TaskID'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+    post:
+      operationId: resumeTask
+      summary: Start or resume a task; failed tasks require retry
+      responses:
+        '200': {$ref: '#/components/responses/Operation'}
+        '202': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/tasks/{id}/retry:
+    parameters:
+      - {$ref: '#/components/parameters/TaskID'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+    post:
+      operationId: retryTask
+      summary: Retain files, remove a failed task record and create a new task
+      description: >-
+        A successful retry changes the task ID. A partial failure may occur
+        after the original record has been removed. Inspect the operation
+        status, previous_task_id and result before retrying the request.
+      responses:
+        '200': {$ref: '#/components/responses/Operation'}
+        '201': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/operations/{id}:
+    get:
+      operationId: getOperation
+      summary: Read a persisted operation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      responses:
+        '200': {$ref: '#/components/responses/Operation'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Single configured API Key; 32 to 512 characters. Not a Xunlei token.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Reuse the same key and request for network retries; use a new key for a new operation.
+      schema: {type: string, minLength: 1, maxLength: 200}
+    TaskID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    Cursor:
+      name: cursor
+      in: query
+      description: The previous response's next_page_token.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+  responses:
+    Operation:
+      description: Persisted operation; inspect its status and result.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [operation]
+            properties:
+              operation: {$ref: '#/components/schemas/Operation'}
+    Error:
+      description: Authentication, validation, state conflict or upstream failure.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code: {type: string}
+                      message: {type: string}
+              - type: object
+                required: [operation]
+                properties:
+                  operation: {$ref: '#/components/schemas/Operation'}
+  schemas:
+    TaskStatus:
+      type: string
+      enum: [pending, running, paused, complete, error, unknown]
+    Task:
+      type: object
+      required: [id, name, type, phase, status, size_bytes, downloaded_bytes, progress, speed_bytes_per_second, observed_at]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+        phase: {type: string, description: Original upstream phase enum.}
+        status: {$ref: '#/components/schemas/TaskStatus'}
+        message: {type: string}
+        url: {type: string}
+        destination_id: {type: string}
+        params:
+          type: object
+          additionalProperties: {type: string}
+        size_bytes: {type: [integer, 'null'], format: int64}
+        downloaded_bytes: {type: [integer, 'null'], format: int64}
+        progress: {type: [number, 'null'], minimum: 0, maximum: 100}
+        speed_bytes_per_second: {type: integer, format: int64}
+        observed_at: {type: string, format: date-time}
+    Device:
+      type: object
+      required: [id, version, online, logged_in, volumes]
+      properties:
+        id: {type: string}
+        version: {type: string}
+        online: {type: boolean}
+        logged_in: {type: boolean}
+        volumes:
+          type: array
+          items:
+            type: object
+            properties:
+              path: {type: string}
+              capacity_bytes: {type: [integer, 'null'], format: int64}
+              used_bytes: {type: [integer, 'null'], format: int64}
+    Directory:
+      type: object
+      required: [id, name, path, writable]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        path: {type: string}
+        writable: {type: boolean}
+    Resource:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        file_index: {type: [integer, 'null']}
+        size_bytes: {type: [integer, 'null'], format: int64}
+        file_count: {type: integer}
+        resources:
+          type: array
+          items: {$ref: '#/components/schemas/Resource'}
+    Resolution:
+      type: object
+      required: [id, url, resources, complete]
+      properties:
+        id: {type: string}
+        url: {type: string}
+        resources:
+          type: array
+          items: {$ref: '#/components/schemas/Resource'}
+        complete:
+          type: boolean
+          description: Whether the whole advertised file tree is available for safe partial selection.
+    CreateTask:
+      type: object
+      additionalProperties: false
+      required: [url, destination_id]
+      properties:
+        url: {type: string, minLength: 1}
+        destination_id: {type: string, minLength: 1}
+        name: {type: string}
+        file_indices:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Omit to select all files; use actual indices returned by resolution, including zero.
+          items: {type: integer, minimum: 0}
+    Operation:
+      type: object
+      required: [id, kind, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        task_id: {type: string}
+        previous_task_id: {type: string}
+        status:
+          type: string
+          enum: [planned, accepted, confirmed, failed, unknown_outcome]
+        message: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        result:
+          type: object
+          description: Operation-specific result, such as a created Task or Directory.
+          additionalProperties: true

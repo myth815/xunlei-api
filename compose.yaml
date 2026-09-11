@@ -1,0 +1,29 @@
+services:
+  xunlei-api:
+    image: ghcr.io/myth815/xunlei-api:${XUNLEI_API_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      LISTEN_ADDR: ":8080"
+      XUNLEI_BASE_URL: ${XUNLEI_BASE_URL:?Set XUNLEI_BASE_URL in .env}
+      API_KEY: ${API_KEY:?Set a random API_KEY of at least 32 characters in .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      XUNLEI_USERNAME: ${XUNLEI_USERNAME:-}
+      XUNLEI_PASSWORD: ${XUNLEI_PASSWORD:-}
+      DATA_DIR: /data
+      UPSTREAM_TIMEOUT: 30s
+      OPERATION_TIMEOUT: 2m
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - xunlei-api-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+volumes:
+  xunlei-api-data:

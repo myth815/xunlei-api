@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+secrets/
+data/
+dist/
+/xunlei-api
+*.out
+*.test
+*.pem
+*.key
+.DS_Store
